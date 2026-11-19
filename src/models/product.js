@@ -59,6 +59,7 @@ function validateProduct(data, isUpdate = false) {
 
 function checkSkuUniqueness(sku, excludeId = null) {
   for (const product of products.values()) {
+    if (product.archivedAt) continue;
     if (product.sku === sku && product.id !== excludeId) {
       return false;
     }
@@ -66,8 +67,13 @@ function checkSkuUniqueness(sku, excludeId = null) {
   return true;
 }
 
+function filterArchived(products) {
+  return products.filter(p => !p.archivedAt);
+}
+
 export function findAll(filters = {}) {
   let result = Array.from(products.values());
+  result = filterArchived(result);
 
   if (filters.category) {
     result = result.filter(p => p.category === filters.category);
@@ -89,16 +95,25 @@ export function findAll(filters = {}) {
       (p.description && p.description.toLowerCase().includes(searchLower))
     );
   }
+  if (filters.inStock !== undefined) {
+    const inStock = filters.inStock === 'true' || filters.inStock === true;
+    result = result.filter(p => inStock ? p.stock > 0 : p.stock === 0);
+  }
 
   return result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 export function findById(id) {
-  return products.get(id) || null;
+  const product = products.get(id);
+  if (!product || product.archivedAt) {
+    return null;
+  }
+  return product;
 }
 
 export function findBySku(sku) {
   for (const product of products.values()) {
+    if (product.archivedAt) continue;
     if (product.sku === sku) {
       return product;
     }
@@ -117,7 +132,7 @@ export function create(data) {
   }
 
   const product = {
-    id: uuidv4(),
+    id: generateid(),
     name: data.name.trim(),
     sku: data.sku.trim(),
     description: data.description?.trim() || '',
@@ -125,7 +140,8 @@ export function create(data) {
     price: Number(data.price.toFixed(2)),
     stock: data.stock || 0,
     status: data.status || 'active',
-    createdAt: new Date()
+    createdAt: new Date(),
+    archivedAt: null
   };
 
   products.set(product.id, product);
@@ -134,7 +150,7 @@ export function create(data) {
 
 export function update(id, patch) {
   const existing = products.get(id);
-  if (!existing) {
+  if (!existing || existing.archivedAt) {
     return null;
   }
 
@@ -163,10 +179,24 @@ export function update(id, patch) {
   return updated;
 }
 
-export function remove(id) {
-  const existed = products.has(id);
-  products.delete(id);
-  return existed;
+export function archive(id) {
+  const existing = products.get(id);
+  if (!existing || existing.archivedAt) {
+    return false;
+  }
+  existing.archivedAt = new Date();
+  products.set(id, existing);
+  return true;
+}
+
+export function restore(id) {
+  const existing = products.get(id);
+  if (!existing || !existing.archivedAt) {
+    return null;
+  }
+  existing.archivedAt = null;
+  products.set(id, existing);
+  return existing;
 }
 
 export function clearAll() {
