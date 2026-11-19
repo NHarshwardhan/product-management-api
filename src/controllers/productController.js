@@ -4,7 +4,8 @@ import {
   findBySku,
   create,
   update,
-  remove
+  archive,
+  restore
 } from '../models/product.js';
 
 function createResponse(success, data = null, error = null) {
@@ -18,7 +19,8 @@ export async function getProducts(req, res, next) {
       status: req.query.status,
       minPrice: req.query.minPrice ? Number(req.query.minPrice) : undefined,
       maxPrice: req.query.maxPrice ? Number(req.query.maxPrice) : undefined,
-      search: req.query.search
+      search: req.query.search,
+      inStock: req.query.inStock
     };
 
     Object.keys(filters).forEach(key => filters[key] === undefined && delete filters[key]);
@@ -71,13 +73,25 @@ export async function updateProduct(req, res, next) {
   }
 }
 
-export async function deleteProduct(req, res, next) {
+export async function archiveProduct(req, res, next) {
   try {
-    const deleted = remove(req.params.id);
-    if (!deleted) {
+    const archived = archive(req.params.id);
+    if (!archived) {
       return res.status(404).json(createResponse(false, null, 'Product not found'));
     }
-    res.json(createResponse(true, { message: 'Product deleted successfully' }));
+    res.json(createResponse(true, { message: 'Product archived successfully' }));
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function restoreProduct(req, res, next) {
+  try {
+    const restored = restore(req.params.id);
+    if (!restored) {
+      return res.status(404).json(createResponse(false, null, 'Product not found'));
+    }
+    res.json(createResponse(true, { message: 'Product restored successfully' }));
   } catch (err) {
     next(err);
   }
