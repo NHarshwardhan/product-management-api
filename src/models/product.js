@@ -132,7 +132,7 @@ export function create(data) {
   }
 
   const product = {
-    id: generateid(),
+    id: uuidv4(),
     name: data.name.trim(),
     sku: data.sku.trim(),
     description: data.description?.trim() || '',
@@ -163,16 +163,19 @@ export function update(id, patch) {
     throw new Error('SKU must be unique');
   }
 
+  // Strip immutable fields from patch
+  const { id: _id, sku: _sku, createdAt: _createdAt, archivedAt: _archivedAt, ...allowedPatch } = patch;
+
   const updated = {
     ...existing,
-    ...patch,
-    name: patch.name?.trim() ?? existing.name,
-    sku: patch.sku?.trim() ?? existing.sku,
-    description: patch.description?.trim() ?? existing.description,
-    category: patch.category ?? existing.category,
-    price: patch.price !== undefined ? Number(patch.price.toFixed(2)) : existing.price,
-    stock: patch.stock !== undefined ? patch.stock : existing.stock,
-    status: patch.status ?? existing.status
+    ...allowedPatch,
+    name: allowedPatch.name?.trim() ?? existing.name,
+    sku: allowedPatch.sku?.trim() ?? existing.sku,
+    description: allowedPatch.description?.trim() ?? existing.description,
+    category: allowedPatch.category ?? existing.category,
+    price: allowedPatch.price !== undefined ? Number(allowedPatch.price.toFixed(2)) : existing.price,
+    stock: allowedPatch.stock !== undefined ? allowedPatch.stock : existing.stock,
+    status: allowedPatch.status ?? existing.status
   };
 
   products.set(id, updated);

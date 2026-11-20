@@ -49,8 +49,10 @@ export async function createProduct(req, res, next) {
     const product = create(req.body);
     res.status(201).json(createResponse(true, product));
   } catch (err) {
-    if (err.message.includes('unique') || err.message.includes('required') ||
-        err.message.includes('must be') || err.message.includes('decimal')) {
+    if (err.message.includes('unique')) {
+      return res.status(409).json(createResponse(false, null, err.message));
+    }
+    if (err.message.includes('required') || err.message.includes('must be') || err.message.includes('decimal')) {
       return res.status(400).json(createResponse(false, null, err.message));
     }
     next(err);

@@ -42,11 +42,13 @@ export function validateCreate() {
       .isIn(VALID_CATEGORIES)
       .withMessage(`category must be one of: ${VALID_CATEGORIES.join(', ')}`),
     body('price')
-      .optional()
-      .isFloat({ gt: 0 })
-      .withMessage('price must be a positive number')
-      .bail()
       .custom(value => {
+        if (value === undefined || value === null) {
+          throw new Error('price is required and must be a positive number');
+        }
+        if (typeof value !== 'number' || value <= 0 || !Number.isFinite(value)) {
+          throw new Error('price must be a positive number');
+        }
         const decimalPlaces = (value.toString().split('.')[1] || '').length;
         if (decimalPlaces > 2) {
           throw new Error('price must have at most 2 decimal places');
