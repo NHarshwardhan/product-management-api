@@ -1,0 +1,633 @@
+openapi: 3.1.0
+info:
+  title: Product Management API
+  version: 1.0.0
+  description: |
+    A RESTful API for managing a product catalogue with full CRUD operations,
+    advanced filtering, soft-archive (delete/restore), and SKU uniqueness enforcement.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:3000
+    description: Development server
+
+tags:
+  - name: Products
+    description: Product catalogue management
+
+components:
+  schemas:
+    # Reusable response envelope
+    ApiEnvelope:
+      type: object
+      required: [success, data, error]
+      properties:
+        success:
+          type: boolean
+          description: Indicates if the request succeeded
+        data:
+          description: Response payload (varies by endpoint)
+          nullable: true
+        error:
+          type: string
+          description: Error message when success is false
+          nullable: true
+
+    # Error response (success: false)
+    ErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiEnvelope'
+        - type: object
+          required: [success, error]
+          properties:
+            success:
+              type: boolean
+              enum: [false]
+            data:
+              type: null
+              enum: [null]
+            error:
+              type: string
+              minLength: 1
+
+    # Full product object (as stored/returned)
+    Product:
+      type: object
+      required: [id, name, sku, description, category, price, stock, status, createdAt, archivedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier (UUID v4)
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        name:
+          type: string
+          minLength: 1
+          description: Product name
+          example: "Wireless Headphones"
+        sku:
+          type: string
+          minLength: 1
+          description: Stock Keeping Unit (unique among active products)
+          example: "WH-001"
+        description:
+          type: string
+          description: Product description
+          example: "Premium noise-cancelling headphones"
+        category:
+          type: string
+          enum: [electronics, clothing, food, books, other]
+          description: Product category
+          example: "electronics"
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          multipleOf: 0.01
+          description: Price in dollars (positive, max 2 decimal places)
+          example: 99.99
+        stock:
+          type: integer
+          minimum: 0
+          description: Available stock quantity
+          example: 10
+        status:
+          type: string
+          enum: [active, inactive, discontinued]
+          description: Product status
+          example: "active"
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation timestamp (ISO 8601)
+          example: "2024-01-15T10:30:00.000Z"
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Archive timestamp (null if active, ISO 8601 if archived)
+          example: null
+
+    # Input for POST /products (required fields marked)
+    ProductInput:
+      type: object
+      required: [name, sku, price]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Product name (required, non-empty)
+          example: "Wireless Headphones"
+        sku:
+          type: string
+          minLength: 1
+          description: Stock Keeping Unit (required, non-empty, unique)
+          example: "WH-001"
+        description:
+          type: string
+          description: Optional product description
+          example: "Premium noise-cancelling headphones"
+        category:
+          type: string
+          enum: [electronics, clothing, food, books, other]
+          default: other
+          description: 'Product category (default: other)'
+          example: "electronics"
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          multipleOf: 0.01
+          description: Price (required, positive, max 2 decimal places)
+          example: 99.99
+        stock:
+          type: integer
+          minimum: 0
+          default: 0
+          description: 'Initial stock quantity (default: 0)'
+          example: 10
+        status:
+          type: string
+          enum: [active, inactive, discontinued]
+          default: active
+          description: 'Initial status (default: active)'
+          example: "active"
+
+    # Input for PATCH /products/{id} (all optional, immutable fields excluded)
+    ProductPatch:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Product name
+          example: "Updated Headphones"
+        description:
+          type: string
+          description: Product description
+          example: "Updated description"
+        category:
+          type: string
+          enum: [electronics, clothing, food, books, other]
+          description: Product category
+          example: "electronics"
+        price:
+          type: number
+          format: double
+          minimum: 0.01
+          multipleOf: 0.01
+          description: Price (positive, max 2 decimal places)
+          example: 79.99
+        stock:
+          type: integer
+          minimum: 0
+          description: Stock quantity
+          example: 15
+        status:
+          type: string
+          enum: [active, inactive, discontinued]
+          description: Product status
+          example: "active"
+
+    # Archive/Restore response
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: "Product archived successfully"
+
+  parameters:
+    productId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Product UUID
+      example: "550e8400-e29b-41d4-a716-446655440000"
+
+    # Query parameters for GET /products
+    categoryParam:
+      name: category
+      in: query
+      schema:
+        type: string
+        enum: [electronics, clothing, food, books, other]
+      description: Filter by product category
+      example: "electronics"
+
+    statusParam:
+      name: status
+      in: query
+      schema:
+        type: string
+        enum: [active, inactive, discontinued]
+      description: Filter by product status
+      example: "active"
+
+    minPriceParam:
+      name: minPrice
+      in: query
+      schema:
+        type: number
+        format: double
+        minimum: 0
+      description: Minimum price (inclusive)
+      example: 10
+
+    maxPriceParam:
+      name: maxPrice
+      in: query
+      schema:
+        type: number
+        format: double
+        minimum: 0
+      description: Maximum price (inclusive)
+      example: 100
+
+    inStockParam:
+      name: inStock
+      in: query
+      schema:
+        type: string
+        enum: ["true", "false"]
+      description: Filter by stock status (true = stock > 0, false = stock === 0)
+      example: "true"
+
+    searchParam:
+      name: search
+      in: query
+      schema:
+        type: string
+      description: Case-insensitive partial match on name, SKU, or description
+      example: "wireless"
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missingName:
+              summary: Missing required field
+              value:
+                success: false
+                data: null
+                error: "name is required and must be a non-empty string"
+            invalidPrice:
+              summary: Invalid price
+              value:
+                success: false
+                data: null
+                error: "price must be a positive number"
+
+    NotFound:
+      description: Product not found or archived
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              summary: Product not found
+              value:
+                success: false
+                data: null
+                error: "Product not found"
+
+    Conflict:
+      description: Duplicate SKU
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            duplicateSku:
+              summary: SKU already exists
+              value:
+                success: false
+                data: null
+                error: "SKU must be unique"
+
+    UnprocessableEntity:
+      description: Query parameter validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidCategory:
+              summary: Invalid category enum
+              value:
+                success: false
+                data: null
+                error: "category must be one of: electronics, clothing, food, books, other"
+
+paths:
+  /products:
+    get:
+      tags: [Products]
+      summary: List products with optional filters
+      description: |
+        Returns all non-archived products with optional filtering.
+        All query parameters are optional and combinable.
+        Results are sorted by createdAt descending (newest first).
+      parameters:
+        - $ref: '#/components/parameters/categoryParam'
+        - $ref: '#/components/parameters/statusParam'
+        - $ref: '#/components/parameters/minPriceParam'
+        - $ref: '#/components/parameters/maxPriceParam'
+        - $ref: '#/components/parameters/inStockParam'
+        - $ref: '#/components/parameters/searchParam'
+      responses:
+        '200':
+          description: Successful response with product array
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiEnvelope'
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        enum: [true]
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Product'
+                      error:
+                        type: null
+                        enum: [null]
+              examples:
+                empty:
+                  summary: No products
+                  value:
+                    success: true
+                    data: []
+                    error: null
+                withProducts:
+                  summary: Products found
+                  value:
+                    success: true
+                    data:
+                      - id: "550e8400-e29b-41d4-a716-446655440000"
+                        name: "Wireless Headphones"
+                        sku: "WH-001"
+                        description: "Premium noise-cancelling"
+                        category: "electronics"
+                        price: 99.99
+                        stock: 10
+                        status: "active"
+                        createdAt: "2024-01-15T10:30:00.000Z"
+                        archivedAt: null
+                    error: null
+        '400':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          description: Internal server error
+
+    post:
+      tags: [Products]
+      summary: Create a new product
+      description: |
+        Creates a new product with validation.
+        SKU must be unique among active (non-archived) products.
+        Returns the created product with generated UUID and timestamps.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+            examples:
+              minimal:
+                summary: Minimal required fields
+                value:
+                  name: "New Product"
+                  sku: "NP-001"
+                  price: 29.99
+              full:
+                summary: All fields
+                value:
+                  name: "Wireless Headphones"
+                  sku: "WH-001"
+                  description: "Premium noise-cancelling headphones"
+                  category: "electronics"
+                  price: 99.99
+                  stock: 10
+                  status: "active"
+      responses:
+        '201':
+          description: Product created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiEnvelope'
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        enum: [true]
+                      data:
+                        $ref: '#/components/schemas/Product'
+                      error:
+                        type: null
+                        enum: [null]
+              examples:
+                created:
+                  summary: Created product
+                  value:
+                    success: true
+                    data:
+                      id: "550e8400-e29b-41d4-a716-446655440000"
+                      name: "Wireless Headphones"
+                      sku: "WH-001"
+                      description: "Premium noise-cancelling headphones"
+                      category: "electronics"
+                      price: 99.99
+                      stock: 10
+                      status: "active"
+                      createdAt: "2024-01-15T10:30:00.000Z"
+                      archivedAt: null
+                    error: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          description: Internal server error
+
+  /products/{id}:
+    get:
+      tags: [Products]
+      summary: Get a single product by UUID
+      description: |
+        Retrieves a product by its UUID.
+        Returns 404 if product does not exist or is archived.
+      parameters:
+        - $ref: '#/components/parameters/productId'
+      responses:
+        '200':
+          description: Product found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiEnvelope'
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        enum: [true]
+                      data:
+                        $ref: '#/components/schemas/Product'
+                      error:
+                        type: null
+                        enum: [null]
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Internal server error
+
+    patch:
+      tags: [Products]
+      summary: Partially update a product
+      description: |
+        Updates only the provided fields.
+        Immutable fields (id, sku, createdAt) are ignored if present in request.
+        Unknown fields are silently stripped (allow-list: name, description, category, price, stock, status).
+        Returns 404 if product does not exist or is archived.
+      parameters:
+        - $ref: '#/components/parameters/productId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductPatch'
+            examples:
+              priceUpdate:
+                summary: Update price only
+                value:
+                  price: 79.99
+              multiField:
+                summary: Update multiple fields
+                value:
+                  name: "Updated Headphones"
+                  price: 79.99
+                  stock: 15
+      responses:
+        '200':
+          description: Product updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiEnvelope'
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        enum: [true]
+                      data:
+                        $ref: '#/components/schemas/Product'
+                      error:
+                        type: null
+                        enum: [null]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Internal server error
+
+    delete:
+      tags: [Products]
+      summary: Soft-archive a product
+      description: |
+        Archives a product by setting archivedAt timestamp.
+        Archived products are excluded from GET /products and GET /products/{id}.
+        SKU becomes available for reuse.
+        Use DELETE /products/{id}/restore to undo.
+        Returns 404 if product does not exist or is already archived.
+      parameters:
+        - $ref: '#/components/parameters/productId'
+      responses:
+        '200':
+          description: Product archived successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiEnvelope'
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        enum: [true]
+                      data:
+                        $ref: '#/components/schemas/MessageResponse'
+                      error:
+                        type: null
+                        enum: [null]
+              examples:
+                archived:
+                  summary: Archive confirmation
+                  value:
+                    success: true
+                    data:
+                      message: "Product archived successfully"
+                    error: null
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Internal server error
+
+  /products/{id}/restore:
+    delete:
+      tags: [Products]
+      summary: Restore an archived product
+      description: |
+        Restores a previously archived product by clearing archivedAt.
+        Restored product reappears in GET /products and GET /products/{id}.
+        Returns 404 if product does not exist or was never archived.
+      parameters:
+        - $ref: '#/components/parameters/productId'
+      responses:
+        '200':
+          description: Product restored successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiEnvelope'
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        enum: [true]
+                      data:
+                        $ref: '#/components/schemas/MessageResponse'
+                      error:
+                        type: null
+                        enum: [null]
+              examples:
+                restored:
+                  summary: Restore confirmation
+                  value:
+                    success: true
+                    data:
+                      message: "Product restored successfully"
+                    error: null
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Internal server error
